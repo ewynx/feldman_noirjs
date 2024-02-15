@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<head>
+  <style>
+    .outer {
+        display: flex;
+        justify-content: space-between;
+        width: 100%;
+    }
+    .inner {
+        width: 45%;
+        border: 1px solid black;
+        padding: 10px;
+        word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <script type="module" src="/app.js"></script>
+  <h1>Very basic Noir app</h1>
+  <div id="clientInfo"></div>
+  <div id="connectedClients"></div>
+  <button id="createShares" title="Create Shares" style="width: 100%; height: 30px;">Create shares</button>
+
+  <h1>Real Time Messaging</h1>
+  <pre id="messages" style="height: 200px; overflow: scroll"></pre>
+  <input type="text" id="messageBox" placeholder="Type your message here" style="display: block; width: 100%; margin-bottom: 10px; padding: 10px;" />
+  <button id="send" title="Send Message!" style="width: 100%; height: 30px;">Send Message</button>
+  <input type="text" id="targetClientIdBox" placeholder="Enter target client ID">
+
+
+  <div class="outer">
+    <div id="logs" class="inner"><h2>Logs</h2></div>
+    <div id="results" class="inner"><h2>Proof</h2></div>
+  </div>
+</body>
+</html>
