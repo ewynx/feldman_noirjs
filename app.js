@@ -15,11 +15,15 @@ document.addEventListener('DOMContentLoaded', initializeApp);
 
 const N = 3
 const K = 2 // Then polynomial will have degree K-1
+// clientIds[i] <=> x = i+1
 var clientIds = [];
+let clientShares = new Map();
+var storedCommitments = [];
 var myId;
 
 
 function updateClientIds(ids) {
+  console.log("Current clients")
   clientIds = ids;
 }
 
@@ -28,17 +32,17 @@ function updateMyId(id) {
 }
 
 async function initializeApp() {
-  
+  const sendBtn = document.getElementById('send');
   const createSharesBtn = document.getElementById('createShares');
   const messages = document.getElementById('messages');
-  const messageBox = document.getElementById('messageBox');
+  // const messageBox = document.getElementById('messageBox');
   const targetClientIdBox = document.getElementById('targetClientIdBox');
 
   let ws;
 
   setupWebSocket();
-
   
+  sendBtn.addEventListener('click', sendShareAndCommitments);
   createSharesBtn.addEventListener('click', generateSharesAndCommitments);
 
   function setupWebSocket() {
@@ -59,7 +63,109 @@ async function initializeApp() {
   }
 
   function handleWebSocketMessage({ data }) {
-    // TODO
+    try {
+      const msg = JSON.parse(data);
+      switch (msg.type) {
+          case 'shareCommitment':
+              console.log("Received share and commitments");
+              displayShareAndCommitments(msg.fromClientId, msg.content.share, msg.content.commitments);
+              break;
+          case 'id':
+              updateMyId(msg.clientId);
+              displayClientInfo();
+              break;
+          case 'chat':
+              console.log("Received chat message")
+              showMessage(`${msg.fromClientId}: ${msg.content}`);
+              break;
+          case 'clientList':
+              updateClientIds(msg.clientList)
+              displayConnectedClients(msg.clientList.filter(id => id !== myId));
+              break;
+          default:
+              console.error('Unknown message type:', msg.type);
+      }
+    } catch (error) {
+        console.error('Error parsing message:', error);
+    }
+  }
+
+  function displayShareAndCommitments(fromClientId, share, commitments) {
+    const shareDetails = `Share from ${fromClientId}: ID: ${share.id}, Value: ${share.value}`;
+    const commitmentDetails = commitments.map((commitment, index) => 
+        `Commitment ${index + 1}: (${commitment.x}, ${commitment.y})`
+    ).join(', ');
+
+    showMessage(`${shareDetails}. Commitments: ${commitmentDetails}`);
+}
+  // function sendShare() {
+  //   if (!ws) {
+  //       showMessage("No WebSocket connection :(");
+  //       return;
+  //   }
+
+  //   const targetClientId = targetClientIdBox.value;
+  //   const content = clientShares.get(Number(targetClientId)); //messageBox.value.trim();
+
+  //   console.log(targetClientId);
+  //   console.log(content);
+  //   console.log(clientShares);
+  //   if (content && targetClientId) {
+  //       const message = { type: 'chat', content, fromClientId: myId, targetClientId };
+  //       const serialized = JSON.stringify(message, (key, value) =>
+  //         typeof value === 'bigint' ? value.toString() : value // Convert BigInt to string
+  //       );
+  //       console.log(serialized)
+  //       ws.send(serialized);
+  //       showMessage(`Me: ${content}`);
+  //   } else {
+  //       console.log('Message content or target client ID is missing');
+  //   }
+
+  //   // messageBox.value = '';
+  // }
+  function sendShareAndCommitments() {
+    if (!ws) {
+        showMessage("No WebSocket connection :(");
+        return;
+    }
+
+    const targetClientId = targetClientIdBox.value;
+    const share = clientShares.get(Number(targetClientId));
+    const commitments = storedCommitments; // Assuming this is an array of commitments
+
+    if (share && commitments && targetClientId) {
+        const message = {
+            type: 'shareCommitment',
+            fromClientId: myId,
+            targetClientId: targetClientId,
+            content: {
+                share: {
+                    id: share.id,
+                    value: share.value.toString(), // Convert BigInt to string
+                },
+                commitments: commitments.map(commitment => ({
+                    x: commitment[0].toString(), // Assuming commitment is an array [x, y]
+                    y: commitment[1].toString(),
+                })),
+            },
+        };
+
+        const serialized = JSON.stringify(message, (key, value) =>
+            typeof value === 'bigint' ? value.toString() : value // Handle BigInt conversion
+        );
+
+        ws.send(serialized);
+        showMessage(`Share and commitments sent to client ${targetClientId}`);
+    } else {
+        console.log('Share, commitments, or target client ID is missing');
+    }
+  }
+
+  function showMessage(message) {
+    console.log(message)
+    messages.textContent += `\n\n${message}`;
+    messages.scrollTop = messages.scrollHeight;
   }
 
   function displayClientInfo() {
@@ -95,7 +201,7 @@ class Polynomial {
       xPow = xPow * x;
     }
 
-    return result;
+    return result % order;
   }
 }
 
@@ -121,7 +227,6 @@ function getPolyAndShares(secret, threshold, limit) {
 // returns coeff * basePoint for all coeffs
 function getCommitments(poly, basePoint) {
   return poly.coefficients.map(coefficient => {
-
     // Multiply the base point by the coefficient
     return mulPointEscalar(basePoint, BigInt(coefficient));
   });
@@ -144,8 +249,6 @@ function verifyShare(share, commitments, basePoint) {
 
   // Convert the share value back to a point and compare
   const shareValuePoint = mulPointEscalar(basePoint, Fr.e(BigInt(share.value)));
-  console.log('expectedPoint:', expectedPoint);
-  console.log('shareValuePoint:', shareValuePoint);
   return expectedPoint[0] == shareValuePoint[0] && expectedPoint[1] == shareValuePoint[1];
 }
 
@@ -154,39 +257,54 @@ function generateRandomFr() {
   return Fr.e(randBigInt);
 }
 
-
 async function generateSharesAndCommitments() {
 
-  // Generate a random field element
-  const randomElement = generateRandomFr();
-  let secret = Fr.e(randomElement);
-
+  // FIXME 
+  // For now, we repeat the shares & commitment generation until we have only valid shares.
+  // The shares + commitments should always be valid when generated correctly, but for some reason that is not the case
+  // this has to be fixed!
   const threshold = 2; // Threshold (K)
   const limit = 3; // Total number of shares (N)
+  let isValid1 = false;
+  let isValid2 = false;
+  let isValid3 = false;
 
-  const { shares, poly } = getPolyAndShares(secret, threshold, limit);
+  let shares, poly, commitments;
 
+  while (!isValid1 || !isValid2 || !isValid3) {
+    // Generate a random field element
+    const randomElement = generateRandomFr();
+    let secret = Fr.e(randomElement);
+
+    // Get polynomial and shares
+    const polyAndShares = getPolyAndShares(secret, threshold, limit);
+    shares = polyAndShares.shares;
+    poly = polyAndShares.poly;
+
+    // Get commitments
+    commitments = getCommitments(poly, Base8);
+
+    // Verify each share
+    isValid1 = verifyShare(shares[0], commitments, Base8);
+    isValid2 = verifyShare(shares[1], commitments, Base8);
+    isValid3 = verifyShare(shares[2], commitments, Base8);
+  }
+
+  // Log the valid shares and commitments
   console.log('Shares:', shares.map(share => `ID: ${share.id}, Value: ${share.value}`));
-
-  const commitments = getCommitments(poly, Base8);
   console.log('Commitments:', commitments.map(commitment => `${commitment.toString()}`));
-
-  const isValid1 = verifyShare(shares[0], commitments, Base8);
   console.log('Share 1 is valid:', isValid1);
-
-  const isValid2 = verifyShare(shares[1], commitments, Base8);
   console.log('Share 2 is valid:', isValid2);
+  console.log('Share 3 is valid:', isValid3);
 
+  // Store the shares & commitments
+  clientIds.forEach((clientId, index) => {
+    clientShares.set(clientId, shares[index]);
+  });
+  storedCommitments = commitments
 
   const backend = new BarretenbergBackend(noirjs_demo);
 
-  // Create a proof that verifies the share. 
-  // The receiver instantiates the same with "new Noir{...}" and thus can verify the proof
-  
-  // Questions: 
-  // - what will be the input for the proof?
-  // a client will receive a share. But basically only it's own share. And it doesn't have access to the polynomial
-  
   const simpleZKP = new Noir(noirjs_demo, backend);
 
   const input = { x: shares[0].id.toString(), 

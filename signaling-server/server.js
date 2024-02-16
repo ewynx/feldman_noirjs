@@ -9,16 +9,6 @@ const wss = new WebSocket.Server({ server });
 let clientIdCounter = 1;
 const clients = {};
 
-function broadcastClientList() {
-    const clientList = Object.keys(clients).map(key => clients[key].clientId);
-    const message = JSON.stringify({ type: 'clientList', clientList });
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-        }
-    });
-}
-
 wss.on('connection', ws => {
     setupNewClient(ws);
     ws.on('message', message => handleMessage(ws, message));
@@ -36,8 +26,16 @@ function setupNewClient(ws) {
 
 function handleMessage(ws, message) {
     const msg = JSON.parse(message);
-    if (msg.type === 'chat') {
-        sendChatMessage(msg);
+
+    switch (msg.type) {
+        case 'chat':
+            sendChatMessage(msg);
+            break;
+        case 'shareCommitment':
+            sendShareCommitmentMessage(msg);
+            break;
+        default:
+            console.log(`Unknown message type: ${msg.type}`);
     }
 }
 
@@ -47,9 +45,27 @@ function sendChatMessage(msg) {
     }
 }
 
+function sendShareCommitmentMessage(msg) {
+    if (clients[msg.targetClientId]) {
+        clients[msg.targetClientId].ws.send(JSON.stringify(msg));
+    } else {
+        console.log(`Target client ${msg.targetClientId} not found.`);
+    }
+}
+
 function handleClientDisconnect(ws) {
     delete clients[ws.clientId];
     broadcastClientList();
+}
+
+function broadcastClientList() {
+    const clientList = Object.keys(clients).map(key => clients[key].clientId);
+    const message = JSON.stringify({ type: 'clientList', clientList });
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+        }
+    });
 }
 
 server.listen(3000, () => {
