@@ -1,8 +1,30 @@
+use dep::std::ec::consts::te::baby_jubjub;
+use dep::std::ec::tecurve::affine::Point as TEPoint;
+
+/*
+export const Base8: Point<bigint> = [
+    Fr.e(BigInt("5299619240641551281634865583518297030282874472190772894086521144482721001553")),
+    Fr.e(BigInt("16950150798460657717958625567821834550301663161624707787222815936182638968203"))
+]
+*/
+
 // Verify a share wrt commitments and x
-fn main(x: Field, share: Field, c0: Point, c1: Point) {
-  let g = Point::zero();
-  g.mul(share,p)
-  let lhs = g * share;
+fn main(x: Field, share: Field, c0_x: Field, c0_y: Field, c1_x: Field, c1_y: Field) {
+  let bjj = baby_jubjub();
+  
+  let c0 = TEPoint::new(c0_x, c0_y);
+  let c1 = TEPoint::new(c1_x, c1_y);
+
+  // share * G = (secret + a*x) * G = secret*G + x*a*G
+  let g = bjj.base8;//TEPoint::new(5299619240641551281634865583518297030282874472190772894086521144482721001553, 16950150798460657717958625567821834550301663161624707787222815936182638968203);
+  let lhs = bjj.curve.mul(share, g);
+  
+  // c0 + x * c1 = secret*G + x*a*G
+  let c1_x = bjj.curve.mul(x, c1);
+  let rhs = bjj.curve.add(c1_x, c0);
+  
+  assert(lhs.x == rhs.x);
+  assert(lhs.y == rhs.y);
 }
 
 
