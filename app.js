@@ -20,7 +20,7 @@ var clientIds = [];
 let clientShares = new Map();
 var storedCommitments = [];
 var myId;
-
+var generatedProof;
 
 function updateClientIds(ids) {
   console.log("Current clients")
@@ -41,13 +41,13 @@ async function initializeApp() {
   let ws;
 
   setupWebSocket();
-  
+
   sendBtn.addEventListener('click', sendShareAndCommitments);
   createSharesBtn.addEventListener('click', generateSharesAndCommitments);
 
   function setupWebSocket() {
     if (ws) {
-        closeWebSocket();
+      closeWebSocket();
     }
 
     ws = new WebSocket('ws://localhost:3000');
@@ -66,101 +66,132 @@ async function initializeApp() {
     try {
       const msg = JSON.parse(data);
       switch (msg.type) {
-          case 'shareCommitment':
-              console.log("Received share and commitments");
-              displayShareAndCommitments(msg.fromClientId, msg.content.share, msg.content.commitments);
-              break;
-          case 'id':
-              updateMyId(msg.clientId);
-              displayClientInfo();
-              break;
-          case 'chat':
-              console.log("Received chat message")
-              showMessage(`${msg.fromClientId}: ${msg.content}`);
-              break;
-          case 'clientList':
-              updateClientIds(msg.clientList)
-              displayConnectedClients(msg.clientList.filter(id => id !== myId));
-              break;
-          default:
-              console.error('Unknown message type:', msg.type);
+        case 'shareCommitmentProof':
+          console.log("Received share and commitments");
+          displayShareAndCommitments(msg.fromClientId, msg.content.share, msg.content.commitments, msg.content.proof);
+          break;
+        case 'id':
+          updateMyId(msg.clientId);
+          displayClientInfo();
+          break;
+        case 'chat':
+          console.log("Received chat message")
+          showMessage(`${msg.fromClientId}: ${msg.content}`);
+          break;
+        case 'clientList':
+          updateClientIds(msg.clientList)
+          displayConnectedClients(msg.clientList.filter(id => id !== myId));
+          break;
+        default:
+          console.error('Unknown message type:', msg.type);
       }
     } catch (error) {
-        console.error('Error parsing message:', error);
+      console.error('Error parsing message:', error);
     }
   }
 
-  function displayShareAndCommitments(fromClientId, share, commitments) {
+  async function displayShareAndCommitments(fromClientId, share, commitments, proofData) {
     const shareDetails = `Share from ${fromClientId}: ID: ${share.id}, Value: ${share.value}`;
-    const commitmentDetails = commitments.map((commitment, index) => 
-        `Commitment ${index + 1}: (${commitment.x}, ${commitment.y})`
+    const commitmentDetails = commitments.map((commitment, index) =>
+      `Commitment ${index + 1}: (${commitment.x}, ${commitment.y})`
     ).join(', ');
 
+    // Display share and commitments
     showMessage(`${shareDetails}. Commitments: ${commitmentDetails}`);
-}
-  // function sendShare() {
-  //   if (!ws) {
-  //       showMessage("No WebSocket connection :(");
-  //       return;
-  //   }
 
-  //   const targetClientId = targetClientIdBox.value;
-  //   const content = clientShares.get(Number(targetClientId)); //messageBox.value.trim();
+    // Decode the proof and public inputs from Base64
+    const proof = base64ToUint8Array(proofData.proof);
+    const publicInputs = proofData.publicInputs.map(input => base64ToUint8Array(input));
 
-  //   console.log(targetClientId);
-  //   console.log(content);
-  //   console.log(clientShares);
-  //   if (content && targetClientId) {
-  //       const message = { type: 'chat', content, fromClientId: myId, targetClientId };
-  //       const serialized = JSON.stringify(message, (key, value) =>
-  //         typeof value === 'bigint' ? value.toString() : value // Convert BigInt to string
-  //       );
-  //       console.log(serialized)
-  //       ws.send(serialized);
-  //       showMessage(`Me: ${content}`);
-  //   } else {
-  //       console.log('Message content or target client ID is missing');
-  //   }
+    // Display the proof (optional, depending on your needs)
+    // showMessage(`Proof: ${proofData.proof}`);
 
-  //   // messageBox.value = '';
-  // }
+    console.log(proofData)
+    console.log(publicInputs)
+    console.log(proof)
+    // Verify the proof
+    display('logs', 'Verifying proof... ⌛');
+    try {
+
+      const backend = new BarretenbergBackend(noirjs_demo);
+      //TODO reconstruct the proof obj
+      const receivedProof = {
+        publicInputs: [],
+        proof: proof
+      }
+      console.log(receivedProof)
+
+      const simpleZKP = new Noir(noirjs_demo, backend);
+      const verificationResult = await simpleZKP.verifyFinalProof(receivedProof);
+      display('logs', verificationResult ? 'Verifying proof... ✅' : 'Proof verification failed');
+    } catch (error) {
+      console.error('Proof verification error:', error);
+      display('logs', 'Proof verification error');
+    }
+  }
+
+
+  function uint8ArrayToBase64(bytes) {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
+  function base64ToUint8Array(base64) {
+    const binary_string = window.atob(base64);
+    const len = binary_string.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes;
+  }
+
   function sendShareAndCommitments() {
     if (!ws) {
-        showMessage("No WebSocket connection :(");
-        return;
+      showMessage("No WebSocket connection :(");
+      return;
     }
 
     const targetClientId = targetClientIdBox.value;
     const share = clientShares.get(Number(targetClientId));
-    const commitments = storedCommitments; // Assuming this is an array of commitments
+    const commitments = storedCommitments;
 
-    if (share && commitments && targetClientId) {
-        const message = {
-            type: 'shareCommitment',
-            fromClientId: myId,
-            targetClientId: targetClientId,
-            content: {
-                share: {
-                    id: share.id,
-                    value: share.value.toString(), // Convert BigInt to string
-                },
-                commitments: commitments.map(commitment => ({
-                    x: commitment[0].toString(), // Assuming commitment is an array [x, y]
-                    y: commitment[1].toString(),
-                })),
-            },
-        };
+    if (share && commitments && targetClientId && generatedProof) {
+      const message = {
+        type: 'shareCommitmentProof',
+        fromClientId: myId,
+        targetClientId: targetClientId,
+        content: {
+          share: {
+            id: share.id,
+            value: share.value.toString(),
+          },
+          commitments: commitments.map(commitment => ({
+            x: commitment[0].toString(),
+            y: commitment[1].toString(),
+          })),
+          proof: {
+            publicInputs: generatedProof.publicInputs.map(uint8ArrayToBase64),
+            proof: uint8ArrayToBase64(generatedProof.proof),
+          },
+        },
+      };
 
-        const serialized = JSON.stringify(message, (key, value) =>
-            typeof value === 'bigint' ? value.toString() : value // Handle BigInt conversion
-        );
-
-        ws.send(serialized);
-        showMessage(`Share and commitments sent to client ${targetClientId}`);
+      const serialized = JSON.stringify(message, (key, value) =>
+        typeof value === 'bigint' ? value.toString() : value
+      );
+      console.log(serialized);
+      ws.send(serialized);
+      showMessage(`Share, commitments, and proof sent to client ${targetClientId}`);
     } else {
-        console.log('Share, commitments, or target client ID is missing');
+      console.log('Share, commitments, proof, or target client ID is missing');
     }
   }
+
 
   function showMessage(message) {
     console.log(message)
@@ -174,8 +205,8 @@ async function initializeApp() {
   }
 
   function displayConnectedClients(clientList) {
-      const connectedClients = `Connected Clients: ${clientList.join(', ')}`;
-      document.getElementById('connectedClients').textContent = connectedClients;
+    const connectedClients = `Connected Clients: ${clientList.join(', ')}`;
+    document.getElementById('connectedClients').textContent = connectedClients;
   }
 
 }
@@ -197,7 +228,7 @@ class Polynomial {
     let xPow = BigInt(1);
 
     for (let coefficient of this.coefficients) {
-      result = result+ (xPow*coefficient);
+      result = result + (xPow * coefficient);
       xPow = xPow * x;
     }
 
@@ -307,10 +338,11 @@ async function generateSharesAndCommitments() {
 
   const simpleZKP = new Noir(noirjs_demo, backend);
 
-  const input = { x: shares[0].id.toString(), 
-    share: shares[0].value.toString(), 
+  const input = {
+    x: shares[0].id.toString(),
+    share: shares[0].value.toString(),
     c0_x: commitments[0][0].toString(),
-    c0_y: commitments[0][1].toString(), 
+    c0_y: commitments[0][1].toString(),
     c1_x: commitments[1][0].toString(),
     c1_y: commitments[1][1].toString()
   };
@@ -320,10 +352,11 @@ async function generateSharesAndCommitments() {
   const proof = await simpleZKP.generateFinalProof(input);
   display('logs', 'Generated proof... ✅');
   display('results', proof.proof);
+  generatedProof = proof;
 
-  display('logs', 'Verifying proof... ⌛');
-  const verification = await simpleZKP.verifyFinalProof(proof);
-  display('logs', verification ? 'Verifying proof... ✅' : 'Proof verification failed');
+  //   display('logs', 'Verifying proof... ⌛');
+  //   const verification = await simpleZKP.verifyFinalProof(proof);
+  //   display('logs', verification ? 'Verifying proof... ✅' : 'Proof verification failed');
 }
 
 

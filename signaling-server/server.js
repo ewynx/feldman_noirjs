@@ -31,7 +31,7 @@ function handleMessage(ws, message) {
         case 'chat':
             sendChatMessage(msg);
             break;
-        case 'shareCommitment':
+        case 'shareCommitmentProof':
             sendShareCommitmentMessage(msg);
             break;
         default:
