@@ -100,14 +100,15 @@ async function initializeApp() {
     showMessage(`${shareDetails}. Commitments: ${commitmentDetails}`);
 
     // Decode the proof and public inputs from Base64
-    const proof = base64ToUint8Array(proofData.proof);
-    const publicInputs = proofData.publicInputs.map(input => base64ToUint8Array(input));
+    const proof = base64ToUint8Array(proofData);
+    // const proof = base64ToUint8Array(proofData.proof);
+    // const publicInputs = proofData.publicInputs.map(input => base64ToUint8Array(input));
 
     // Display the proof (optional, depending on your needs)
     // showMessage(`Proof: ${proofData.proof}`);
 
     console.log(proofData)
-    console.log(publicInputs)
+    // console.log(publicInputs)
     console.log(proof)
     // Verify the proof
     display('logs', 'Verifying proof... ⌛');
@@ -150,7 +151,7 @@ async function initializeApp() {
     return bytes;
   }
 
-  function sendShareAndCommitments() {
+  async function sendShareAndCommitments() {
     if (!ws) {
       showMessage("No WebSocket connection :(");
       return;
@@ -174,19 +175,46 @@ async function initializeApp() {
             x: commitment[0].toString(),
             y: commitment[1].toString(),
           })),
-          proof: {
+          proof: uint8ArrayToBase64(generatedProof.proof)
+          /*{
             publicInputs: generatedProof.publicInputs.map(uint8ArrayToBase64),
             proof: uint8ArrayToBase64(generatedProof.proof),
-          },
+          }*/,
         },
       };
 
+      // double check that byte array conversions are correct
+      const converted = uint8ArrayToBase64(generatedProof.proof);
+      const convertedBack = base64ToUint8Array(converted);
+
+      // Check if this proof should work
+      // FIXME VERIFYING THIS FAILS!!!!
+      const receivedProof = {
+        publicInputs: [],
+        proof: convertedBack
+      }
+
+      // VISUALLY LOOKS THE SAME
+      console.log(convertedBack == generatedProof.proof)
+      console.log(generatedProof.proof)
+      console.log(convertedBack)
+ 
       const serialized = JSON.stringify(message, (key, value) =>
         typeof value === 'bigint' ? value.toString() : value
       );
       console.log(serialized);
       ws.send(serialized);
       showMessage(`Share, commitments, and proof sent to client ${targetClientId}`);
+
+      const backend = new BarretenbergBackend(noirjs_demo);
+
+      const simpleZKP = new Noir(noirjs_demo, backend);
+    
+      display('logs', 'Verifying proof... ⌛');
+      const verification = await simpleZKP.verifyFinalProof(generatedProof);
+      display('logs', verification ? 'Verifying proof... ✅' : 'Proof verification failed');
+
+      
     } else {
       console.log('Share, commitments, proof, or target client ID is missing');
     }
